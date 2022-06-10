@@ -1,0 +1,221 @@
+<?php
+
+namespace App\Http\Controllers;
+use App\Http\Controllers\Controller;
+use Stripe;
+use JWTAuth;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Illuminate\Support\Facades\Auth;
+use DB;
+use Config;
+class PaymentController extends Controller
+{
+    
+/**
+     * Add Card Details On Stripe Payment  .
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function addCardDetails(Request $request)
+    { 
+        
+        $stripe = new \Stripe\StripeClient(env('STRIPE_SECRET'));
+        $token=$stripe->tokens->create([
+           'card' => [
+               "number" => $request->number,
+               "exp_month" =>$request->exp_month ,
+               "exp_year" =>$request->exp_year,
+               "cvc" => $request->cvc
+             ],
+        ]);
+   
+   $stripe = new \Stripe\StripeClient(env('STRIPE_SECRET'));
+          $data=$stripe->customers->create([
+            "id"=>"$request->user_id",
+            'name' => $request->name,
+            "email" =>$request->email,
+            "card" =>$token,
+           ]);
+          $stripe = new \Stripe\StripeClient(env('STRIPE_SECRET')  );
+          $save=$stripe->customers->createSource($data->id,
+            ['source' => 'tok_visa']
+          );
+   
+    if($save){
+   
+           return response()->json([
+               'status_code' => Response::HTTP_OK,
+               'message' => trans(
+               'messages.Card Adeed Succesfully.success-message.message'
+                 ), //'added successfully',   
+       ]);
+    }else{
+    return response()->json(
+        [
+            'status' => false,
+            'message' => " Something went wrong ", //'Could not create customer.',
+            'status_code' => 500,
+        ],
+        500
+    );
+    
+    }
+    }
+
+  /**
+     * GetCardDetails Through Save Card .
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+
+
+    public function getCardDetails($id){
+       $stripe = new \Stripe\StripeClient(env('STRIPE_SECRET')  );
+       $val= $stripe->customers->allSources(
+       $id,
+       ['object' => 'card', 'limit' => 1] );
+    
+        if($val){
+    
+           return response()->json([
+               'status_code' => Response::HTTP_OK,
+               'message' => trans(
+               'messages.Card Adeed Succesfully.success-message.message'
+                 ),//'Fetch  successfully',
+                 'card_details'=>$val->data
+         ]);
+        }else{
+          return response()->json(
+           [
+           'status' => false,
+           'message' => " Something went wrong ", //'Could not create customer.',
+           'status_code' => 500,
+           ],
+           500
+            );
+    
+        }
+    }
+
+     /**
+     * Payment Process Through Save Card .
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function paymentProcess(Request $request){
+        Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
+      
+      $customer = \Stripe\Customer::retrieve(($request->user_id));
+      $customer->save();
+      
+      // Now charge customer
+      $charge = \Stripe\Charge::create([
+                  'amount'   =>  $request->price,
+                  'currency' => 'usd',
+                  'customer' => $customer->id,
+              ]);
+              if($charge){
+    
+                $member_order_details=array(
+                  'user_id'=>$request->user_id,
+                  'plan_id'=>$request->plan_id,
+                  'plan_amount'=>$request->price,
+                  'order_id'=>$this->generateRandomString(),
+                  'transaction_id'=>$charge->id,
+                  'transaction_status'=>$charge->status,
+                  'transaction_date'=>date('Y-m-d'),
+                );
+          
+             $MembershipOrders= DB::table('membership_order_details')->insert($member_order_details);
+
+                return response()->json([
+                    'status_code' => Response::HTTP_OK,
+                    'message' => trans(
+                    'messages.Payment  Succesfully done.success-message.message'
+                      ),//'Fetch  successfully',
+                      'payment_details'=>$charge
+            ]);
+        }else{
+        return response()->json(
+            [
+                'status' => false,
+                'message' => " Something went wrong ", //'Could not create customer.',
+                'status_code' => 500,
+            ],
+            500
+            );
+            }
+      }
+
+
+/**
+     * Payment Process Through Save Card  on hostcontrol.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+
+
+    public function hostPaymentProcess(Request $request){
+      Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
+    
+    $customer = \Stripe\Customer::retrieve(($request->user_id));
+    $customer->save();
+    
+    // Now charge customer
+    $charge = \Stripe\Charge::create([
+                'amount'   =>  $request->price,
+                'currency' => 'usd',
+                'customer' => $customer->id,
+            ]);
+            if($charge){
+  
+              $orderid=$this->generateRandomString();
+              $host_order_details=array(
+                'user_id'=>$request->user_id,
+                'hostplan_id'=>$request->hostplan_id,
+                'hostplan_amount'=>$request->price,
+                'order_id'=>$orderid,
+                'transaction_id'=>$charge->id,
+                'transaction_status'=>$charge->status,
+                'transaction_date'=>date('Y-m-d'),
+              );
+        
+           $hostOrders= DB::table('host_order_details')->insert($host_order_details);
+        
+           $orderdetails=array(
+            'order_id'=>$orderid,
+           
+          );
+        $users= Host::where('user_id', $request->user_id)->where('hostplan_id', $request->hostplan_id)->update($orderdetails);
+
+              return response()->json([
+                  'status_code' => Response::HTTP_OK,
+                  'message' => trans(
+                  'messages.Payment  Succesfully done.success-message.message'
+                    ),//'Fetch  successfully',
+                    'payment_details'=>$charge
+          ]);
+      }else{
+      return response()->json(
+          [
+              'status' => false,
+              'message' => " Something went wrong ", //'Could not create customer.',
+              'status_code' => 500,
+          ],
+          500
+          );
+          }
+    }
+
+
+
+
+    
+
+
+}
